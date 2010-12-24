@@ -16,8 +16,48 @@
     (let ((proc (get op type-tags)))
       (if proc
 	  (apply proc (map contents args))
-	  (error "No method for types -- apply-generic" 
-		 (list op type-tags))))))
+	  (error "No method for types -- apply-generic")))))
+
+(define (enumerate-super-types type)
+  (define (enumerate-super-types-inner type all-types)
+    (let ((super-type (get-super-type type)))
+      (if (not (eq? super-type '()))
+	  (enumerate-super-types-inner super-type (append all-types (list super-type)))
+	  all-types)))
+  (enumerate-super-types-inner type type))
+(enumerate-super-types (map type-tag (list (make-rational 1 2))))
+(enumerate-super-types '(rational))
+
+(define (enumerate-super-types-list types)
+  (if (eq? types '()) '())
+  (if (= (length types) 1)
+      (enumerate-super-types types)
+      (let ((supers (enumerate-super-types (list (car types))))
+	    (first (map 
+		    (lambda (x) (cons (car types) x)) 
+		    (enumerate-super-types-list (cdr types)))))
+	(if (= 1 (length supers))
+	    first
+	    (cons first
+		  (enumerate-super-types-list (cons (cadr supers) (cdr types))))))))
+(enumerate-super-types-list '(rational))
+(enumerate-super-types-list '(complex rational))
+(enumerate-super-types-list '(rational complex scheme-number))
+(get-super-type 'rational)
+
+(map (lambda (x)(append '(foo) x)) '(1 2))
+
+(define (attach-tag type-tag contents)
+  (cond ((number? contents) contents)
+	(else (cons type-tag contents))))
+(define (type-tag datum)
+  (cond ((number? datum) 'scheme-number)
+	((pair? datum) (car datum))
+	(error "Bad tagged datum -- type-tag" datum)))
+(define (contents datum)
+  (cond ((number? datum) datum)
+	((pair? datum) (cdr datum))
+	(error "Bad tagged datum -- contents" datum)))
 
 (define (install-rectangular-package)
   (define (real-part z) (car z))
@@ -39,10 +79,7 @@
 
 (define (make-from-real-imag x y)
   ((get 'make-from-real-imag 'rectangular) x y))
-
-(real-part (make-from-real-imag 3 4))
-(magnitude (make-from-real-imag 3 4))
-
+		
 (define (install-complex-package)
   (define (make-from-real-imag x y)
     ((get 'make-from-real-imag 'rectangular) x y))
@@ -58,8 +95,10 @@
 	 (equ? z1 z2)))
   (put '=zero? '(complex)
        (lambda (z) (=zero? z)))
-  (put 'make-from-real-imag 'complex 
+  (put 'make-from-real-imag '(complex)
        (lambda (x y) (tag (make-from-real-imag x y))))
+  (put 'get-super-type '(complex)
+       (lambda (x) '()))
   'done)
 (install-complex-package)
 
@@ -67,29 +106,21 @@
 (put 'imag-part '(complex) imag-part)
 (put 'magnitude '(complex) magnitude)
 (put 'angle '(complex) magnitude)
+(define (get-super-type x) (apply-generic 'get-super-type x))
   
 (define (make-complex-from-real-imag x y)
-  ((get 'make-from-real-imag 'complex) x y))
+  ((get 'make-from-real-imag '(complex)) x y))
 
 (magnitude (make-complex-from-real-imag 3 4))
-
-; 2.78
-(define (attach-tag type-tag contents)
-  (cond ((number? contents) contents)
-	(else (cons type-tag contents))))
-(define (type-tag datum)
-  (cond ((number? datum) 'scheme-number)
-	((pair? datum) (car datum))
-	(error "Bad tagged datum -- type-tag" datum)))
-(define (contents datum)
-  (cond ((number? datum) datum)
-	((pair? datum) (cdr datum))
-	(error "Bad tagged datum -- contents" datum)))
+(get-super-type (make-complex-from-real-imag 3 4))
 
 (define (add x y) (apply-generic 'add x y))
 (define (sub x y) (apply-generic 'sub x y))
 (define (mul x y) (apply-generic 'mul x y))
 (define (div x y) (apply-generic 'div x y))
+(define (=zero? x) (apply-generic '=zero? x))
+(define (raise x) (apply-generic 'raise x))
+(define (equ? x y) (apply-generic 'equ? x y))
 
 (define (install-scheme-number-package)
   (put 'add '(scheme-number scheme-number)
@@ -104,15 +135,22 @@
        (lambda (x y) (= x y)))
   (put '=zero? '(scheme-number)
        (lambda (x) (= 0 x)))
-  (put 'make 'scheme-number
+  (put 'make '(scheme-number)
        (lambda (x) x))
+  (put 'raise '(scheme-number)
+       (lambda (x) (make-complex-from-real-imag x 0)))
+  (put 'get-super-type '(scheme-number)
+       (lambda (x) 'complex))
   'done)
 (install-scheme-number-package)
-(=zero? 1)
+(=zero? 0)
 (add 3 4)
 (sub 5 6)
 (mul 2 3)
 (div 5 3)
+(raise 3)
+(equ? 1 1)
+(get-super-type 1)
 
 ; 2.79
 (define (install-rational-package)
@@ -126,28 +164,35 @@
 	 (= (denom r1) (denom r2))))
   (define (=zero? r)
     (= 0 (numer r)))
+  (define (raise r)
+    (/ (numer r) (denom r)))
+  (put 'raise '(rational)
+       (lambda (r) (raise r)))
   (put 'equ? '(rational rational)
     (lambda (r1 r2)
       (equ? r1 r2)))
   (put '=zero? '(rational)
        (lambda (r) (=zero? r)))
   (define (tag x) (attach-tag 'rational x))
-  (put 'make 'rational
+  (put 'make '(rational)
        (lambda (n d) (tag (make-rat n d))))
+  (put 'get-super-type '(rational)
+       (lambda (r) 'scheme-number))
   'done)
 (install-rational-package)
 (define (make-rational n d)
-  ((get 'make 'rational) n d))
-
-
-(define (equ? x y) (apply-generic 'equ? x y))
+  ((get 'make '(rational)) n d))
+(make-rational 3 5)
+(raise (raise (make-rational 3 5)))
+(get-super-type (make-rational 1 2))
 
 (equ? (make-rational 3 2) (make-rational 3 3))
 (equ? 4 4)
 (equ? (make-complex-from-real-imag 3 1) (make-complex-from-real-imag 3 1))
 
 ; 2.80
-(define (=zero? x) (apply-generic '=zero? x))
 (=zero? (make-complex-from-real-imag 0 0))
 (=zero? (make-rational 1 1))
 (=zero? 0)
+
+
