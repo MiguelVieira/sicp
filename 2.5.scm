@@ -1,4 +1,3 @@
-; 2.77
 (define *op-table* (make-equal-hash-table))
 (define (put op type proc)
   (hash-table/put! *op-table* (list op type) proc))
@@ -11,12 +10,29 @@
   (cons type-tag contents))
 (define (type-tag datum) (car datum))
 (define (contents datum) (cdr datum))
+(define (raise-multi val target-tag)
+  (if (eq? (type-tag val) target-tag)
+      val
+      (raise-multi (raise val) target-tag)))
+
 (define (apply-generic op . args)
   (let ((type-tags (map type-tag args)))
     (let ((proc (get op type-tags)))
-      (if proc
+      (if (not (eq? '() proc))
 	  (apply proc (map contents args))
-	  (error "No method for types -- apply-generic")))))
+	  (let ((super-types (enumerate-super-types type-tags)))
+	    (define (apply-generic-inner types)
+	      (display (car types))
+	      (newline)
+	      (let ((proc (get op (car types))))
+		(if (not (eq? '() proc))
+		   (apply proc (map contents (map raise-multi args (car types))))
+		   ; (apply proc (map contents args))
+		   ; types
+		    (if (not (eq? (cdr types) '()))
+			(apply-generic-inner (cdr types))
+			(error "No method for types -- apply-generic")))))
+	    (apply-generic-inner (cdr super-types)))))))
 
 (define (attach-tag type-tag contents)
   (cond ((number? contents) contents)
@@ -35,10 +51,18 @@
   (define (imag-part z) (cdr z))
   (define (make-from-real-imag x y) (cons x y))
   (define (magnitude z) (sqrt (+ (square (real-part z)) (square (imag-part z)))))
+  (define (add z1 z2) (make-from-real-imag (+ (real-part z1) (real-part z2))
+					   (+ (imag-part z1) (imag-part z2))))
+  (define (sub z1 z2) (make-from-real-imag (- (real-part z1) (real-part z2))
+					   (- (imag-part z1) (imag-part z2))))
   (define (tag x) (attach-tag 'rectangular x))
   (put 'real-part '(rectangular) real-part)
   (put 'imag-part '(rectangular) imag-part)
   (put 'magnitude '(rectangular) magnitude)
+  (put 'add '(rectangular rectangular) 
+       (lambda (x y) (tag (add x y))))
+  (put 'sub '(rectangular rectangular)
+       (lambda (x y) (tag (sub x y))))
   (put 'make-from-real-imag 'rectangular
        (lambda (x y) (tag (make-from-real-imag x y))))
   'done)
@@ -50,10 +74,17 @@
 
 (define (make-from-real-imag x y)
   ((get 'make-from-real-imag 'rectangular) x y))
+
+(add (make-from-real-imag 1 2) (make-from-real-imag 2 2))
+(sub (make-from-real-imag 2 3) (make-from-real-imag 5 5))
 		
 (define (install-complex-package)
   (define (make-from-real-imag x y)
     ((get 'make-from-real-imag 'rectangular) x y))
+  (define (add x y)
+    ((get 'add '(rectangular rectangular)) (contents x) (contents y)))
+  (define (sub x y)
+    ((get 'sub '(rectangular rectangular)) (contents x) (contents y)))
   (define (tag z) (attach-tag 'complex z))
   (define (equ? z1 z2)
     (and (= (real-part z1) (real-part z2)) 
@@ -66,6 +97,10 @@
 	 (equ? z1 z2)))
   (put '=zero? '(complex)
        (lambda (z) (=zero? z)))
+  (put 'add '(complex complex)
+       (lambda (x y) (tag (add x y))))
+  (put 'sub '(complex complex)
+       (lambda (x y) (tag (sub x y))))
   (put 'make-from-real-imag '(complex)
        (lambda (x y) (tag (make-from-real-imag x y))))
   (put 'get-super-type '(complex)
@@ -84,6 +119,9 @@
 
 (magnitude (make-complex-from-real-imag 3 4))
 (get-super-type (make-complex-from-real-imag 3 4))
+
+(add (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
+(sub (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
 
 (define (add x y) (apply-generic 'add x y))
 (define (sub x y) (apply-generic 'sub x y))
@@ -123,7 +161,6 @@
 (equ? 1 1)
 (get-super-type 1)
 
-; 2.79
 (define (install-rational-package)
   (define (numer x) (car x))
   (define (denom x) (cdr x))
@@ -161,79 +198,42 @@
 (equ? 4 4)
 (equ? (make-complex-from-real-imag 3 1) (make-complex-from-real-imag 3 1))
 
-; 2.80
 (=zero? (make-complex-from-real-imag 0 0))
 (=zero? (make-rational 1 1))
 (=zero? 0)
-     
-(define (find-next types)
-  (define (find-next-inner types)
-    (let ((super-type (get-super-type (car types))))
-      (if (eq? super-type '())
-	  (if (= (length types) 1)
-	      '()
-	      (let ((next-super (find-next (cdr types))))
-		(if (eq? next-super '())
-		    '()
-		    (cons (car types) next-super))))
-	  (cons super-type (cdr types)))))
-  (reverse (find-next-inner (reverse types))))
-
-(find-next '(rational))
-(find-next '(complex))
-(find-next '(complex complex complex))
-(find-next '(rational complex))
-(find-next '(rational rational))
-(find-next '(rational complex scheme-number))
-(find-next '(rational complex complex))
 
 (define (enumerate-super-types types)
-  (if (= (length types) 1)
-      (let ((super-type (get-super-type types)))
+  (let ((super-type (get-super-type types)))
+    (if (= (length types) 1)
 	(if (eq? super-type '())
-	    '()
-	    (cons types (enumerate-super-types super-type))))
-      (map 
-       (lambda (x) (cons (car types) x))
-       (enumerate-super-types (cdr types)))))
-
+	    (list types)
+	    (cons types (enumerate-super-types (list super-type))))
+	(let ((remaining (enumerate-super-types (cdr types))))
+	  (let ((first-part  
+		 (map (lambda (x) (cons (car types) x)) remaining)))
+	    (if (eq? super-type '())
+		first-part
+		(append
+		 first-part
+		 (enumerate-super-types (cons super-type (cdr types))))))))))
+	 
 (enumerate-super-types '(rational))
 (enumerate-super-types '(complex))
 (enumerate-super-types '(rational rational))
-(enumerate-super-types (cdr '(rational rational)))
-'(rational)
-(cdr '(rational rational))
-(get-super-type '(complex))
+(enumerate-super-types '(complex rational))
+(enumerate-super-types '(rational complex))
+(enumerate-super-types '(rational complex scheme-number))
+(enumerate-super-types '(rational scheme-number complex))
 
-  (define (enumerate-super-types-inner type all-types)
-    (let ((super-type (get-super-type type)))
-      (if (not (eq? super-type '()))
-	  (enumerate-super-types-inner super-type (append all-types (list (list super-type))))
-	  all-types)))
-  (enumerate-super-types-inner type (list type)))
-(enumerate-super-types (map type-tag (list (make-rational 1 2))))
-(enumerate-super-types '(rational))
-(enumerate-super-types '(complex))
+(raise-multi (make-rational 1 2) 'complex)
+(raise-multi 1.2 'complex)
+(raise-multi 1 'scheme-number)
+(map raise-multi (list 1 (make-rational 1 2)) '(complex complex))
 
-(cons (list 1) (list (list 2)))
+(let ((c (make-complex-from-real-imag 1 2))
+      (r (make-rational 1 2)))
+  (add r c))
 
-(cons 1 3)
-
-(define (enumerate-super-types-list types)
-  (let ((next (find-next types)))
-    (if (eq? '() next)
-	(list types)
-	(append (list types) (enumerate-super-types-list next)))))
-(define (enumerate-super-types-main types)
-  (cdr (enumerate-super-types-list types)))
-      
-(find-next '(scheme-number))
-(enumerate-super-types-list '(rational))
-(enumerate-super-types-list '(scheme-number))
-(enumerate-super-types-list '(complex rational))
-(enumerate-super-types-list '(rational complex))
-(enumerate-super-types-list '(rational complex scheme-number))
-(get-super-type 'rational)
-
-(map (lambda (x)(append '(foo) x)) '(1 2))
+(add 1 (make-complex-from-real-imag 1.1 2))
+(sub (make-complex-from-real-imag 2 2) 3)
 
