@@ -16,23 +16,26 @@
       (raise-multi (raise val) target-tag)))
 
 (define (apply-generic op . args)
-  (let ((type-tags (map type-tag args)))
-    (let ((proc (get op type-tags)))
-      (if (not (eq? '() proc))
-	  (apply proc (map contents args))
-	  (let ((super-types (enumerate-super-types type-tags)))
-	    (define (apply-generic-inner types)
-	      (display (car types))
-	      (newline)
-	      (let ((proc (get op (car types))))
-		(if (not (eq? '() proc))
-		   (apply proc (map contents (map raise-multi args (car types))))
-		   ; (apply proc (map contents args))
-		   ; types
-		    (if (not (eq? (cdr types) '()))
-			(apply-generic-inner (cdr types))
-			(error "No method for types -- apply-generic")))))
-	    (apply-generic-inner (cdr super-types)))))))
+  (define (drop x) 
+    (let ((projected (apply-generic-inner 'project (list x))))
+      (if (eq? (type-tag projected) (type-tag x))
+	  x
+	  (drop projected))))
+   (define (apply-generic-inner op args)
+    (let ((type-tags (map type-tag args)))
+      (let ((proc (get op type-tags)))
+	(if (not (eq? '() proc))
+	    (apply proc (map contents args))
+	    (let ((super-types (enumerate-super-types type-tags)))
+	      (define (apply-generic-raise types)
+		(let ((proc (get op (car types))))
+		  (if (not (eq? '() proc))
+		      (apply proc (map contents (map raise-multi args (car types))))
+		      (if (not (eq? (cdr types) '()))
+			  (apply-generic-raise (cdr types))
+			  (error "No method for types -- apply-generic")))))
+	      (apply-generic-raise (cdr super-types)))))))
+  (drop (apply-generic-inner op args)))
 
 (define (attach-tag type-tag contents)
   (cond ((number? contents) contents)
@@ -65,6 +68,11 @@
        (lambda (x y) (tag (sub x y))))
   (put 'make-from-real-imag 'rectangular
        (lambda (x y) (tag (make-from-real-imag x y))))
+  (put 'project '(rectangular)
+       (lambda (x) 
+	 (if (= (imag-part x) 0)
+	     (real-part x)
+	     x)))
   'done)
 (install-rectangular-package)
 
@@ -74,9 +82,6 @@
 
 (define (make-from-real-imag x y)
   ((get 'make-from-real-imag 'rectangular) x y))
-
-(add (make-from-real-imag 1 2) (make-from-real-imag 2 2))
-(sub (make-from-real-imag 2 3) (make-from-real-imag 5 5))
 		
 (define (install-complex-package)
   (define (make-from-real-imag x y)
@@ -105,8 +110,14 @@
        (lambda (x y) (tag (make-from-real-imag x y))))
   (put 'get-super-type '(complex)
        (lambda (x) '()))
+  (put 'project '(complex)
+       (lambda (x) (project x)))
   'done)
 (install-complex-package)
+
+(project (make-complex-from-real-imag 2 1))
+
+((get 'project '(complex)) (make-complex-from-real-imag 2 1))
 
 (put 'real-part '(complex) real-part)
 (put 'imag-part '(complex) imag-part)
@@ -120,9 +131,6 @@
 (magnitude (make-complex-from-real-imag 3 4))
 (get-super-type (make-complex-from-real-imag 3 4))
 
-(add (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
-(sub (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
-
 (define (add x y) (apply-generic 'add x y))
 (define (sub x y) (apply-generic 'sub x y))
 (define (mul x y) (apply-generic 'mul x y))
@@ -130,6 +138,12 @@
 (define (=zero? x) (apply-generic '=zero? x))
 (define (raise x) (apply-generic 'raise x))
 (define (equ? x y) (apply-generic 'equ? x y))
+
+(add (make-from-real-imag 1 2) (make-from-real-imag 2 2))
+(sub (make-from-real-imag 2 3) (make-from-real-imag 5 5))
+
+(add (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
+(sub (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
 
 (define (install-scheme-number-package)
   (put 'add '(scheme-number scheme-number)
@@ -150,8 +164,14 @@
        (lambda (x) (make-complex-from-real-imag x 0)))
   (put 'get-super-type '(scheme-number)
        (lambda (x) 'complex))
+  (put 'project '(scheme-number)
+       (lambda (x)
+	 (if (= (round x) x)
+	     (make-rational x 1)
+	     x)))
   'done)
 (install-scheme-number-package)
+
 (=zero? 0)
 (add 3 4)
 (sub 5 6)
@@ -186,6 +206,8 @@
        (lambda (n d) (tag (make-rat n d))))
   (put 'get-super-type '(rational)
        (lambda (r) 'scheme-number))
+  (put 'project '(rational)
+       (lambda (r) (tag r)))
   'done)
 (install-rational-package)
 (define (make-rational n d)
@@ -236,4 +258,20 @@
 
 (add 1 (make-complex-from-real-imag 1.1 2))
 (sub (make-complex-from-real-imag 2 2) 3)
+(equ? (make-complex-from-real-imag 2 0) (make-rational 2 1))
 
+(define (project x) (apply-generic 'project x))
+
+(project (make-from-real-imag 2 0))
+(project (make-from-real-imag 2 1))
+(project (contents (make-complex-from-real-imag 2 1)))
+(project (make-complex-from-real-imag 2 0))
+(project (make-complex-from-real-imag 2 1))
+(project 1)
+(project 1.2)
+(project (make-rational 1 1))
+
+(sub (make-complex-from-real-imag 2 1) (make-complex-from-real-imag 1 1))
+(add (make-complex-from-real-imag 2 (- 1)) (make-complex-from-real-imag 1 1))
+(add 2.1 0.9)
+(sub 2.1 0.1)
