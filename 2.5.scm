@@ -280,4 +280,7 @@
 (add 2.1 0.9)
 (sub 2.1 0.1)
 
+(make-rational 1 2)
+(magnitude (make-complex-from-real-imag (make-rational 1 2) (make-rational 5 3)))
+
 'done
