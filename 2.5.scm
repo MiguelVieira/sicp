@@ -74,18 +74,19 @@
   (define (imag-part z) (cdr z))
   (define (make-from-real-imag-inner x y) (cons x y))
   (define (magnitude z) (sqrt (+ (square (real-part z)) (square (imag-part z)))))
-  (define (add z1 z2) (make-from-real-imag-inner (+ (real-part z1) (real-part z2))
-					   (+ (imag-part z1) (imag-part z2))))
-  (define (sub z1 z2) (make-from-real-imag-inner (- (real-part z1) (real-part z2))
-					   (- (imag-part z1) (imag-part z2))))
+  (define (add z1 z2) (make-from-real-imag-inner 
+		       (+ (real-part z1) (real-part z2))
+		       (+ (imag-part z1) (imag-part z2))))
   (define (tag x) (attach-tag 'rectangular x))
+  (define (negate-inner x) 
+    (make-from-real-imag 
+     (negate (real-part x)) 
+     (negate (imag-part x))))
   (put 'real-part '(rectangular) real-part)
   (put 'imag-part '(rectangular) imag-part)
   (put 'magnitude '(rectangular) magnitude)
   (put 'add '(rectangular rectangular) 
        (lambda (x y) (drop (tag (add x y)))))
-  (put 'sub '(rectangular rectangular)
-       (lambda (x y) (drop (tag (sub x y)))))
   (put 'make-from-real-imag '(scheme-number scheme-number)
        (lambda (x y) (tag (make-from-real-imag-inner x y))))
   (put 'project '(rectangular)
@@ -93,6 +94,9 @@
 	 (if (= (imag-part x) 0)
 	     (real-part x)
 	     x)))
+  (put 'negate '(rectangular)
+       (lambda (x)
+	 (negate-inner x)))
   'done)
 (install-rectangular-package)
 
@@ -103,12 +107,8 @@
 (define (make-from-real-imag x y) (apply-generic 'make-from-real-imag x y))
 		
 (define (install-complex-package)
-;  (define (make-from-real-imag x y)
-;    ((get 'make-from-real-imag 'rectangular) x y))
   (define (add x y)
     ((get 'add '(rectangular rectangular)) (contents x) (contents y)))
-  (define (sub x y)
-    ((get 'sub '(rectangular rectangular)) (contents x) (contents y)))
   (define (tag z) (attach-tag 'complex z))
   (define (my-equ? z1 z2)
     (and (equ? (real-part z1) (real-part z2)) 
@@ -123,8 +123,8 @@
        (lambda (z) (=zero?-inner z)))
   (put 'add '(complex complex)
        (lambda (x y) (tag (add x y))))
-  (put 'sub '(complex complex)
-       (lambda (x y) (tag (sub x y))))
+  (put 'negate '(complex)
+       (lambda (x) (tag (negate x))))
   (put 'make-complex-from-real-imag '(scheme-number scheme-number)
        (lambda (x y) (tag (make-from-real-imag x y))))
   (put 'get-super-type '(complex)
@@ -143,7 +143,7 @@
   (apply-generic 'make-complex-from-real-imag x y))
 
 (define (add x y) (apply-generic 'add x y))
-(define (sub x y) (apply-generic 'sub x y))
+(define (sub x y) (apply-generic 'add x (negate y)))
 (define (mul x y) (apply-generic 'mul x y))
 (define (div x y) (apply-generic 'div x y))
 (define (raise x) (apply-generic 'raise x))
@@ -151,8 +151,8 @@
 (define (install-scheme-number-package)
   (put 'add '(scheme-number scheme-number)
        (lambda (x y) (+ x y)))
-  (put 'sub '(scheme-number scheme-number)
-       (lambda (x y) (- x y)))
+  (put 'negate '(scheme-number)
+       (lambda (x) (- x)))
   (put 'mul '(scheme-number scheme-number)
        (lambda (x y) (* x y)))
   (put 'div '(scheme-number scheme-number)
@@ -190,6 +190,11 @@
     (/ (numer r) (denom r)))
   (put 'raise '(rational)
        (lambda (r) (raise r)))
+  (put 'negate '(rational)
+       (lambda (r) 
+	 (make-rat 
+	  (negate (numer r)) 
+	  (negate (denom r)))))
   (put 'equ? '(rational rational)
     (lambda (r1 r2)
       (equ? r1 r2)))
@@ -210,12 +215,113 @@
 
 (define (project x) (apply-generic 'project x))
 
+(define (install-polynomial-package)
+  (define (make-poly variable termlist)
+    (cons variable termlist))
+  (define (variable p) (car p))
+  (define (termlist p) (cdr p))
+  (define (same-variable? a b) (eq? a b))
+  (define (negate-inner p) 
+    (make-poly (variable p) (negate-termlist (termlist p))))
+  (define (add-terms l1 l2)
+    (cond ((empty-termlist? l1) l2)
+	  ((empty-termlist? l2) l1)
+	  (else
+	   (let ((t1 (first-term l1)) (t2 (first-term l2)))
+	     (cond ((> (order t1) (order t2))
+		    (adjoin-term
+		     t1 (add-terms (rest-terms l1) l2)))
+		   ((< (order t1) (order t2))
+		    (adjoin-term
+		     t2 (add-terms l1 (rest-terms l2))))
+		   (else 
+		    (adjoin-term
+		     (make-term (order t1)
+				(add (coeff t1) (coeff t2)))
+		     (add-terms (rest-terms l1)
+				(rest-terms l2)))))))))
+  (define (add-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+	(make-poly (variable p1)
+		   (add-terms (termlist p1)
+			      (termlist p2)))
+	(error "polys not in same var -- add-poly"
+	       (list p1 p2))))
+  (define (mul-terms l1 l2)
+    (if (empty-termlist? l1)
+	(the-empty-termlist)
+	(add-terms (mul-term-by-all-terms (first-term l1) l2)
+		   (mul-terms (rest-terms l1) l2))))
+  (define (mul-term-by-all-terms t1 l)
+    (if (empty-termlist? l)
+	(the-empty-termlist)
+	(let ((t2 (first-term l)))
+	  (adjoin-term 
+	   (make-term (+ (order t1) (order t2))
+		      (mul (coeff t1) (coeff t2)))
+	   (mul-term-by-all-terms t1 (rest-terms l))))))
+  (define (mul-poly p1 p2) 
+    (if (same-variable? (variable p1) (variable p2))
+	(make-poly (variable p1)
+		   (mul-terms (termlist p1)
+			      (termlist p2)))
+	(error "polys not in same var -- mul-poly"
+	       (list p1 p2))))
+  (define (=zero?-inner p)
+    (=zero?-termlist (termlist p)))
+  (define (tag p) (attach-tag 'polynomial p))
+  (put 'add '(polynomial polynomial)
+       (lambda (p1 p2) (tag (add-poly p1 p2))))
+  (put 'mul '(polynomial polynomial)
+       (lambda (p1 p2) (tag (mul-poly p1 p2))))
+  (put 'make '(polynomial) 
+       (lambda (var terms) (tag (make-poly var terms))))
+  (put '=zero? '(polynomial)
+       (lambda (p) (=zero?-inner p)))
+  'done)
+(install-polynomial-package)
+
+(define (make-poly var terms)
+  ((get 'make '(polynomial)) var terms))
+
+(define (adjoin-term term termlist)
+  (if (=zero? (coeff term))
+      termlist
+      (cons term termlist)))
+(define (the-empty-termlist) '())
+(define (first-term termlist) (car termlist))
+(define (rest-terms termlist) (cdr termlist))
+(define (empty-termlist? termlist) (null? termlist))
+(define (make-term order coeff) (list order coeff))
+(define (order term) (car term))
+(define (coeff term) (cadr term))
+(define (=zero?-termlist termlist) 
+  (if (eq? (the-empty-termlist) termlist)
+      #t
+      (and (= 0 (coeff (first-term termlist))) 
+	   (=zero?-termlist (rest-terms termlist)))))
+(define (negate-termlist t)
+  (if (eq? (the-empty-termlist) t)
+      t
+      (let ((first (first-term t)))
+	(adjoin-term 
+	 (make-term (order first) (negate (coeff first))) 
+	 (rest-terms t)))))
+
+(define (negate x) (apply-generic 'negate x))
+
+; tests
+
 (make-complex-from-real-imag 3 4)
 (get-super-type (make-complex-from-real-imag 3 4))
 
 (make-from-real-imag 1 1)
 (add (make-from-real-imag 1 2) (make-from-real-imag 2 2))
 (sub (make-from-real-imag 2 3) (make-from-real-imag 5 5))
+
+(negate (make-from-real-imag 1 1))
+(negate (make-complex-from-real-imag 1 1))
+(sub (make-complex-from-real-imag 1 1) (make-complex-from-real-imag 1 1))
 
 (add (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
 (sub (make-complex-from-real-imag 1 2) (make-complex-from-real-imag 2 2))
@@ -283,4 +389,36 @@
 (make-rational 1 2)
 (magnitude (make-complex-from-real-imag (make-rational 1 2) (make-rational 5 3)))
 
+(make-poly 'x 
+	   (adjoin-term (make-term 0 1) 
+			(adjoin-term (make-term 1 2) 
+				     (adjoin-term (make-term 2 1) 
+						  (the-empty-termlist)))))
+
+(make-poly 'x '((0 1) (1 2) (2 1)))
+(add (make-poly 'x '((2 2))) (make-poly 'x '((3 2))))
+(add (make-poly 'x '((3 2))) (make-poly 'x '((2 2))))
+(add (make-poly 'x '((2 2))) (make-poly 'x '((2 2))))
+(mul (make-poly 'x '((1 3))) (make-poly 'x '((1 1) (2 3))))
+
+(=zero?-termlist '((1 0) (3 0) (2 0)))
+(=zero?-termlist '((1 0) (3 1) (2 0)))
+(=zero?-termlist '())
+(=zero? (make-poly 'x '((1 0) (3 0))))
+(=zero? (make-poly 'x '((1 0) (3 1))))
+
+
+(make-poly 'x 
+	   (adjoin-term (make-term 0 1) 
+			(adjoin-term (make-term 1 2) 
+				     (adjoin-term (make-term 2 1) 
+						  (the-empty-termlist)))))
+
+(make-poly 'x (adjoin-term (make-term 2 (make-poly 'y '((1 1)))) (the-empty-termlist)))
+(add '(polynomial x (2 (polynomial y (1 1)))) '(polynomial x (2 (polynomial y (1 1)))))
+
+(negate (make-from-real-imag 1 2))
+(negate (make-complex-from-real-imag 3 (- 1)))
+
 'done
+
