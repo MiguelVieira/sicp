@@ -284,15 +284,6 @@
 (define (make-poly var terms)
   ((get 'make '(polynomial)) var terms))
 
-(define (adjoin-term term termlist)
-  (if (= 0 (coeff term))
-      termlist
-      (let ((new-density (/ (+ (term-count termlist) 1) (order term))))
-	(if (< new-density 0.5)
-	    (sparsify (adjoin-term-generic term termlist))
-	    (densify (adjoin-term-generic term termlist))))))
-(define (adjoin-term-generic term termlist)
-  ((get 'adjoin-term-generic (type-tag termlist)) term (contents termlist)))
 
 (define (dense-termlist-tag)
   '(termlist-dense))
@@ -302,7 +293,9 @@
 (define (the-empty-termlist) 
   (attach-tag (car (dense-termlist-tag)) '()))
 (define (empty-termlist? termlist)
-  (equal? termlist (the-empty-termlist)))
+  (or 
+   (equal? termlist (dense-termlist-tag))
+   (equal? termlist (sparse-termlist-tag))))
 (define (make-term order coeff) (list order coeff))
 (define (order term) (car term))
 (define (coeff term) (cadr term))
@@ -327,7 +320,9 @@
   (define (term-count-sparse termlist)
     (length termlist))
   (define (rest-terms-sparse termlist)
-    (cdr termlist))
+    (if (null? termlist)
+	termlist
+	(cdr termlist)))
   (define (sparsify-from-sparse termlist)
     termlist)
   (define (densify-from-sparse termlist)
@@ -336,7 +331,7 @@
 	  dst-dense
 	  (densify-inner
 	   (rest-terms-sparse src-sparse)
-	   (adjoin-term (first-term src-sparse) dst-dense))))
+	   (adjoin-term (first-term-sparse src-sparse) dst-dense))))
     (densify-inner termlist (the-empty-termlist)))
   (define (adjoin-term-sparse term termlist)
     (cons term termlist))
@@ -412,52 +407,107 @@
 (install-termlist-dense)
 
 	  
-; to make generic
+; generic functions
 (define (first-term termlist)
   (if (empty-termlist? termlist)
       '()
       (apply-generic 'first-term termlist)))
+
 (define (rest-terms termlist)
   (if (empty-termlist? termlist)
-      '()
+      termlist
       (if (= (term-count termlist) 1)
-	  (the-empty-termlist)
+	  (list (type-tag termlist))
 	  (apply-generic 'rest-terms termlist))))
+
 (define (term-count termlist)
   (apply-generic 'term-count termlist))
-(define (densify termlist)
-  (if (empty-termlist? termlist)
-      (attach-tag (dense-termlist-tag) termlist)
-      (apply-generic 'densify termlist)))
+
+(define (copy-termlist src dst)
+  (if (equal? (type-tag src) (type-tag dst))
+      src
+      (if (empty-termlist? src)
+	  (if (equal? (type-tag dst) (car (sparse-termlist-tag)))
+	      (attach-tag (type-tag dst) (reverse (contents dst)))
+	      dst)
+	  (copy-termlist
+	   (rest-terms src)
+	   (adjoin-term-generic (first-term src) dst)))))
+
 (define (sparsify termlist)
-  (if (empty-termlist? termlist)
-      (attach-tag (sparse-termlist-tag) termlist)
-      (apply-generic 'sparsify termlist)))
+  (if (equal? (type-tag termlist) (car (sparse-termlist-tag)))
+      termlist
+      (copy-termlist termlist (sparse-termlist-tag))))
+
+(define (densify termlist)
+  (if (equal? (type-tag termlist) (car (dense-termlist-tag)))
+      termlist
+      (copy-termlist termlist (dense-termlist-tag))))
+
+(define (adjoin-term term termlist)
+  (if (= 0 (coeff term))
+      termlist
+      (let ((new-density (/ (+ (term-count termlist) 1) (order term))))
+	(if (< new-density 0.5)
+	    (sparsify (adjoin-term-generic term termlist))
+	    (densify (adjoin-term-generic term termlist))))))
+
+(define (adjoin-term-generic term termlist)
+  ((get 'adjoin-term-generic (list (type-tag termlist))) term (contents termlist)))
 
 (define (negate x) (apply-generic 'negate x))
 
 ; tests
 
-; first-term
+(display '(first-term tests))
 (first-term '(termlist-sparse (1 1) (2 2)))
 (first-term '(termlist-sparse))
 (first-term '(termlist-dense 1 0 0 0))
 (first-term '(termlist-dense))
 
-; term-count
+(display '(term-count tests))
 (= (term-count (the-empty-termlist)) 0)
 (= (term-count '(termlist-sparse (1 1))) 1)
 (= (term-count '(termlist-sparse (2 2) (1 1))) 2)
 (= (term-count '(termlist-dense 1 0 0)) 1)
 (= (term-count '(termlist-dense 1 0 1)) 2)
 
-; rest-terms
-(eq? (rest-terms (the-empty-termlist)) '())
+(display '(rest-terms tests))
+(equal? (rest-terms (the-empty-termlist)) (the-empty-termlist))
+(equal? (rest-terms '(termlist-sparse)) '(termlist-sparse))
+(equal? (rest-terms '(termlist-dense)) '(termlist-dense))
 (equal? (rest-terms '(termlist-sparse (1 1))) (the-empty-termlist))
 (equal? (rest-terms '(termlist-sparse (2 2) (1 1))) '(termlist-sparse (1 1)))
 (equal? (rest-terms '(termlist-dense 1)) (the-empty-termlist))
 (equal? (rest-terms '(termlist-dense 1 0 0 0)) (the-empty-termlist))
 (equal? (rest-terms '(termlist-dense 1 0 1)) '(termlist-dense 1))
+
+(display '(adjoin-term-generic tests))
+(equal? (adjoin-term-generic '(2 2) (the-empty-termlist)) '(termlist-dense 2 0 0))
+(equal? (adjoin-term-generic '(5 1) '(termlist-dense 1 0)) '(termlist-dense 1 0 0 0 1 0))
+(equal? (adjoin-term-generic '(5 1) '(termlist-sparse (1 1))) '(termlist-sparse (5 1) (1 1)))
+(equal? (adjoin-term-generic '(2 2) '(termlist-sparse)) '(termlist-sparse (2 2)))
+
+(display '(copy-termlist tests))
+(equal? (copy-termlist '(termlist-dense 1 0 1) '(termlist-dense)) '(termlist-dense 1 0 1))
+(equal? (copy-termlist '(termlist-dense 1 0 1) '(termlist-sparse)) '(termlist-sparse (2 1) (0 1)))
+(equal? (copy-termlist '(termlist-sparse (2 2)) '(termlist-dense)) '(termlist-dense 2 0 0))
+(equal? (copy-termlist '(termlist-sparse (5 1) (3 3)) '(termlist-sparse)) '(termlist-sparse (5 1) (3 3)))
+
+(display '(densify tests))
+(equal? (densify '(termlist-dense 1 0 1)) '(termlist-dense 1 0 1))
+(equal? (densify '(termlist-sparse (2 2))) '(termlist-dense 2 0 0))
+
+(display '(sparsify tests))
+(equal? (sparsify '(termlist-dense 1 0 1)) '(termlist-sparse (2 1) (0 1)))
+(equal? (sparsify '(termlist-sparse (5 1) (3 3))) '(termlist-sparse (5 1) (3 3)))
+
+
+(display '(densify tests))
+(equal? (densify (the-empty-termlist)) (the-empty-termlist))
+(equal? (densify '(termlist-dense 1 1 0 1)) '(termlist-dense 1 1 0 1))
+(densify '(termlist-sparse (1 1)))
+(sparsify '(termlist-dense 1 0))
 
 (the-empty-termlist)
 (adjoin-term (make-term 10 10) (the-empty-termlist))
