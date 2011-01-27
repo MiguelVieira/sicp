@@ -1,4 +1,4 @@
-(define *op-table* (make-equal-hash-table))
+b(define *op-table* (make-equal-hash-table))
 (define (put op type proc)
   (hash-table/put! *op-table* (list op type) proc))
 (define (get op type)
@@ -304,6 +304,9 @@
       #t
       (and (= 0 (coeff (first-term termlist))) 
 	   (=zero?-termlist (rest-terms termlist)))))
+
+
+
 (define (negate-termlist t)
   (if (empty-termlist? t)
       t
@@ -323,16 +326,6 @@
     (if (null? termlist)
 	termlist
 	(cdr termlist)))
-  (define (sparsify-from-sparse termlist)
-    termlist)
-  (define (densify-from-sparse termlist)
-    (define (densify-inner src-sparse dst-dense)
-      (if (null? src-sparse)
-	  dst-dense
-	  (densify-inner
-	   (rest-terms-sparse src-sparse)
-	   (adjoin-term (first-term-sparse src-sparse) dst-dense))))
-    (densify-inner termlist (the-empty-termlist)))
   (define (adjoin-term-sparse term termlist)
     (cons term termlist))
   (put 'term-count (sparse-termlist-tag)
@@ -341,19 +334,16 @@
        (lambda (x) (first-term-sparse x)))
   (put 'rest-terms (sparse-termlist-tag)
        (lambda (x) (attach-tag (car (sparse-termlist-tag)) (rest-terms-sparse x))))
-  (put 'sparsify (sparse-termlist-tag)
-       (lambda (x) (attach-tag (car (sparse-termlist-tag)) (sparsify-from-sparse x))))
-  (put 'densify (sparse-termlist-tag)
-       (lambda (x) (attach-tag (car (dense-termlist-tag)) (densify-from-sparse x))))
   (put 'adjoin-term-generic (sparse-termlist-tag)
        (lambda (term termlist) (attach-tag (car (sparse-termlist-tag)) (adjoin-term-sparse term termlist))))
   'done)
 (install-termlist-sparse)
 
-
 (define (install-termlist-dense)
   (define (first-term-dense termlist)
-    (make-term (- (length termlist) 1) (car termlist)))
+    (if (null? termlist)
+	'()
+	(make-term (- (length termlist) 1) (car termlist))))
   (define (term-count-dense termlist)
     (define (term-count-inner l count)
       (if (null? l)
@@ -370,16 +360,6 @@
 	      (rest-terms-inner (cdr l))
 	      l)))
     (rest-terms-inner (cdr termlist)))
-  (define (sparsify-from-dense termlist)
-    (define (sparsify-inner dense sparse)
-      (if (null? dense)
-	  sparse
-	  (sparsify-inner 
-	   (rest-terms-dense dense) 
-	   (adjoin-term (first-term-dense dense) sparse))))
-    (sparsify-inner termlist (car (sparse-termlist-tag) '())))
-  (define (densify-from-dense termlist)
-    termlist)
   (define (adjoin-term-dense term termlist)
     (define (adjoin-term-dense-inner t-inner tlist-inner)
       (if (> (order t-inner) (order (first-term-dense tlist-inner)))
@@ -395,10 +375,6 @@
        (lambda (x) (first-term-dense x)))
   (put 'rest-terms (dense-termlist-tag)
        (lambda (x) (attach-tag (car (dense-termlist-tag)) (rest-terms-dense x))))
-  (put 'sparsify (dense-termlist-tag)
-       (lambda (x) (attach-tag (car (sparse-termlist-tag)) (sparsify-from-dense x))))
-  (put 'densify (dense-termlist-tag)
-       (lambda (x) (attach-tag (car (dense-termlist-tag)) (densify-from-dense x))))
   (put 'adjoin-term-generic (dense-termlist-tag)
        (lambda (term termlist) (attach-tag (car (dense-termlist-tag)) (adjoin-term-dense term termlist))))
   (put 'term-count (dense-termlist-tag)
@@ -409,9 +385,7 @@
 	  
 ; generic functions
 (define (first-term termlist)
-  (if (empty-termlist? termlist)
-      '()
-      (apply-generic 'first-term termlist)))
+  (apply-generic 'first-term termlist))
 
 (define (rest-terms termlist)
   (if (empty-termlist? termlist)
@@ -423,34 +397,11 @@
 (define (term-count termlist)
   (apply-generic 'term-count termlist))
 
-(define (copy-termlist src dst)
-  (if (equal? (type-tag src) (type-tag dst))
-      src
-      (if (empty-termlist? src)
-	  (if (equal? (type-tag dst) (car (sparse-termlist-tag)))
-	      (attach-tag (type-tag dst) (reverse (contents dst)))
-	      dst)
-	  (copy-termlist
-	   (rest-terms src)
-	   (adjoin-term-generic (first-term src) dst)))))
-
-(define (sparsify termlist)
-  (if (equal? (type-tag termlist) (car (sparse-termlist-tag)))
-      termlist
-      (copy-termlist termlist (sparse-termlist-tag))))
-
-(define (densify termlist)
-  (if (equal? (type-tag termlist) (car (dense-termlist-tag)))
-      termlist
-      (copy-termlist termlist (dense-termlist-tag))))
 
 (define (adjoin-term term termlist)
   (if (= 0 (coeff term))
       termlist
-      (let ((new-density (/ (+ (term-count termlist) 1) (order term))))
-	(if (< new-density 0.5)
-	    (sparsify (adjoin-term-generic term termlist))
-	    (densify (adjoin-term-generic term termlist))))))
+      (adjoin-term-generic term termlist)))
 
 (define (adjoin-term-generic term termlist)
   ((get 'adjoin-term-generic (list (type-tag termlist))) term (contents termlist)))
@@ -459,11 +410,17 @@
 
 ; tests
 
+(define (test val)
+  (if val
+      #t
+      (error "test failed")))
+
 (display '(first-term tests))
 (first-term '(termlist-sparse (1 1) (2 2)))
 (first-term '(termlist-sparse))
 (first-term '(termlist-dense 1 0 0 0))
 (first-term '(termlist-dense))
+
 
 (display '(term-count tests))
 (= (term-count (the-empty-termlist)) 0)
@@ -476,7 +433,9 @@
 (equal? (rest-terms (the-empty-termlist)) (the-empty-termlist))
 (equal? (rest-terms '(termlist-sparse)) '(termlist-sparse))
 (equal? (rest-terms '(termlist-dense)) '(termlist-dense))
-(equal? (rest-terms '(termlist-sparse (1 1))) (the-empty-termlist))
+(equal? 
+ (rest-terms '(termlist-sparse (1 1))) 
+ '(termlist-sparse))
 (equal? (rest-terms '(termlist-sparse (2 2) (1 1))) '(termlist-sparse (1 1)))
 (equal? (rest-terms '(termlist-dense 1)) (the-empty-termlist))
 (equal? (rest-terms '(termlist-dense 1 0 0 0)) (the-empty-termlist))
@@ -488,62 +447,17 @@
 (equal? (adjoin-term-generic '(5 1) '(termlist-sparse (1 1))) '(termlist-sparse (5 1) (1 1)))
 (equal? (adjoin-term-generic '(2 2) '(termlist-sparse)) '(termlist-sparse (2 2)))
 
-(display '(copy-termlist tests))
-(equal? (copy-termlist '(termlist-dense 1 0 1) '(termlist-dense)) '(termlist-dense 1 0 1))
-(equal? (copy-termlist '(termlist-dense 1 0 1) '(termlist-sparse)) '(termlist-sparse (2 1) (0 1)))
-(equal? (copy-termlist '(termlist-sparse (2 2)) '(termlist-dense)) '(termlist-dense 2 0 0))
-(equal? (copy-termlist '(termlist-sparse (5 1) (3 3)) '(termlist-sparse)) '(termlist-sparse (5 1) (3 3)))
 
-(display '(densify tests))
-(equal? (densify '(termlist-dense 1 0 1)) '(termlist-dense 1 0 1))
-(equal? (densify '(termlist-sparse (2 2))) '(termlist-dense 2 0 0))
-
-(display '(sparsify tests))
-(equal? (sparsify '(termlist-dense 1 0 1)) '(termlist-sparse (2 1) (0 1)))
-(equal? (sparsify '(termlist-sparse (5 1) (3 3))) '(termlist-sparse (5 1) (3 3)))
-
-
-(display '(densify tests))
-(equal? (densify (the-empty-termlist)) (the-empty-termlist))
-(equal? (densify '(termlist-dense 1 1 0 1)) '(termlist-dense 1 1 0 1))
-(densify '(termlist-sparse (1 1)))
-(sparsify '(termlist-dense 1 0))
-
-(the-empty-termlist)
-(adjoin-term (make-term 10 10) (the-empty-termlist))
-(adjoin-term (make-term 10 10) '(termlist-sparse (1 0 0)))
-(list (type-tag (the-empty-termlist)))
-
-(adjoin-term (make-term 1 1) (the-empty-termlist))
-(adjoin-term-generic (make-term 1 1) (the-empty-termlist))
-(adjoin-term-generic (make-term 10 1) (the-empty-termlist))
-(sparsify '(1 1))
-
-
-(densify (the-empty-termlist))
-(sparsify (the-empty-termlist))
-(type-tag (the-empty-termlist))
-(contents (the-empty-termlist))
-
-
-(sparsify (attach-tag (car (sparse-termlist-tag)) '((4 1) (1 1))))
-(densify (attach-tag (car (sparse-termlist-tag)) '((4 1) (1 1))))
-(densify (attach-tag (car (dense-termlist-tag)) '(1 0 0 0 0)))
-(sparsify (attach-tag (car (dense-termlist-tag)) '(1 0 0 0 0)))
-((get 'densify (sparse-termlist-tag)) '((4 1)))
-((get 'rest-terms (sparse-termlist-tag)) '((4 1) (1 1)))
-(rest-terms (attach-tag (car (sparse-termlist-tag)) '((4 1) (1 1))))
-(term-count (attach-tag (car (sparse-termlist-tag)) '((4 1) (5 1))))
-(first-term (attach-tag (car (sparse-termlist-tag)) '((1 1))))
-((get 'term-count (sparse-termlist-tag)) '((4 1)))
-
-(order (make-term 2 1))
-(/ (+ (term-count (the-empty-termlist)) 1) (order (make-term 1 1)))
-(sparsify (the-empty-termlist))
-(densify (the-empty-termlist))
-(first-term (the-empty-termlist))
-(empty-termlist? (the-empty-termlist))
-
+(display '(adjoin-term tests))
+(equal? 
+ (adjoin-term (make-term 2 10) (the-empty-termlist))
+ '(termlist-dense 10 0 0))
+(equal? 
+ (adjoin-term (make-term 4 10) '(termlist-dense 1 0 0)) 
+ '(termlist-dense 10 0 1 0 0))
+(equal?
+ (adjoin-term '(2 1) '(termlist-sparse (1 1)))
+ '(termlist-sparse (2 1) (1 1)))
 
 (make-complex-from-real-imag 3 4)
 (get-super-type (make-complex-from-real-imag 3 4))
@@ -622,35 +536,35 @@
 (make-rational 1 2)
 (magnitude (make-complex-from-real-imag (make-rational 1 2) (make-rational 5 3)))
 
-(adjoin-term (make-term 2 1) (the-empty-termlist))
-
 (make-poly 'x 
-	   (adjoin-term (make-term 0 1) 
+	   (adjoin-term (make-term 2 1)
 			(adjoin-term (make-term 1 2) 
-				     (adjoin-term (make-term 2 1) 
+				     (adjoin-term (make-term 0 1) 
 						  (the-empty-termlist)))))
 
-(make-poly 'x '((0 1) (1 2) (2 1)))
-(add (make-poly 'x '((2 2))) (make-poly 'x '((3 2))))
-(add (make-poly 'x '((3 2))) (make-poly 'x '((2 2))))
-(add (make-poly 'x '((2 2))) (make-poly 'x '((2 2))))
-(mul (make-poly 'x '((1 3))) (make-poly 'x '((1 1) (2 3))))
+(make-poly 'x '(termlist-sparse (0 1) (1 2) (2 1)))
+(add (make-poly 'x '(termlist-sparse (2 2))) (make-poly 'x '(termlist-dense 2 0 0 0)))
+(add (make-poly 'x '(termlist-sparse (3 2))) (make-poly 'x '(termlist-sparse (2 2))))
+(add (make-poly 'x '(termlist-dense 2 0 0 0)) (make-poly 'x '(termlist-dense 2 0 0 0)))
+(mul (make-poly 'x '(termlist-sparse (1 3))) (make-poly 'x '(termlist-sparse (2 3) (1 1))))
+(mul (make-poly 'x '(termlist-dense 3 0)) (make-poly 'x '(termlist-dense 3 1 0)))
 
-(=zero?-termlist '((1 0) (3 0) (2 0)))
-(=zero?-termlist '((1 0) (3 1) (2 0)))
-(=zero?-termlist '())
-(=zero? (make-poly 'x '((1 0) (3 0))))
-(=zero? (make-poly 'x '((1 0) (3 1))))
+(test (=zero?-termlist '(termlist-sparse)))
+(test (=zero?-termlist '(termlist-dense)))
+(test (=zero?-termlist '(termlist-dense 0 0)))
+(test (=zero?-termlist '(termlist-sparse (2 0) (1 0) (0 0))))
+
+(test (=zero? (make-poly 'x '(termlist-sparse (1 0) (3 0)))))
+(test (not (=zero? (make-poly 'x '(termlist-sparse (1 0) (3 1))))))
 
 
 (make-poly 'x 
-	   (adjoin-term (make-term 0 1) 
-			(adjoin-term (make-term 1 2) 
-				     (adjoin-term (make-term 2 1) 
-						  (the-empty-termlist)))))
-
-(make-poly 'x (adjoin-term (make-term 2 (make-poly 'y '((1 1)))) (the-empty-termlist)))
-(add '(polynomial x (2 (polynomial y (1 1)))) '(polynomial x (2 (polynomial y (1 1)))))
+	   (adjoin-term (make-term 2 
+				   (make-poly 'y '(termlist-sparse (1 1)))
+				   )
+			(the-empty-termlist))
+)
+(add '(polynomial x '(termlist-sparse (2 (polynomial y (1 1)))) '(polynomial x (2 (polynomial y (1 1)))))
 
 (negate (make-from-real-imag 1 2))
 (negate (make-complex-from-real-imag 3 (- 1)))
