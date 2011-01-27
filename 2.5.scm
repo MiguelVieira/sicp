@@ -1,4 +1,4 @@
-b(define *op-table* (make-equal-hash-table))
+(define *op-table* (make-equal-hash-table))
 (define (put op type proc)
   (hash-table/put! *op-table* (list op type) proc))
 (define (get op type)
@@ -399,7 +399,7 @@ b(define *op-table* (make-equal-hash-table))
 
 
 (define (adjoin-term term termlist)
-  (if (= 0 (coeff term))
+  (if (=zero? (coeff term))
       termlist
       (adjoin-term-generic term termlist)))
 
@@ -564,14 +564,13 @@ b(define *op-table* (make-equal-hash-table))
 				   )
 			(the-empty-termlist))
 )
-(add '(polynomial x '(termlist-sparse (2 (polynomial y (1 1)))) '(polynomial x (2 (polynomial y (1 1)))))
+(add 
+ '(polynomial x termlist-sparse (2 (polynomial y termlist-sparse (1 1)))) 
+ '(polynomial x termlist-sparse (2 (polynomial y termlist-sparse (1 1)))))
 
 (negate (make-from-real-imag 1 2))
 (negate (make-complex-from-real-imag 3 (- 1)))
 
-(first-term-dense '(1 0 1))
-
-(adjoin-term-dense (make-term 7 4) '(1 0 -1))
 
 'done
 
