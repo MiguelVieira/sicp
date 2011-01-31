@@ -215,6 +215,63 @@
 
 (define (project x) (apply-generic 'project x))
 
+(define (div-terms l1 l2)
+  (if (empty-termlist? l1)
+      (list (the-empty-termlist) (the-empty-termlist))
+      (let ((t1 (first-term l1))
+	    (t2 (first-term l2)))
+	(if (> (order t2) (order t1))
+	    (list (the-empty-termlist) l1)
+	    (let ((termlist
+		   (adjoin-term 
+		    (make-term (- (order t1) (order t2)) (div (coeff t1) (coeff t2)))
+		    (the-empty-termlist))))	  
+	      (let ((m (mul-terms termlist l2)))
+		(let ((diff (sub-terms l1 m)))
+		  (let ((result (div-terms diff l2)))
+		    (list (adjoin-term (first-term termlist) (car result)) (cadr result))))))))))
+
+(define (negate-termlist t)
+  (apply-generic 'negate-termlist t))
+	
+(define (add-terms l1 l2)
+  (cond ((empty-termlist? l1) l2)
+	((empty-termlist? l2) l1)
+	(else
+	 (let ((t1 (first-term l1)) (t2 (first-term l2)))
+	   (cond ((> (order t1) (order t2))
+		  (adjoin-term
+		   t1 (add-terms (rest-terms l1) l2)))
+		 ((< (order t1) (order t2))
+		  (adjoin-term
+		   t2 (add-terms l1 (rest-terms l2))))
+		 (else 
+		  (adjoin-term
+		   (make-term (order t1)
+			      (add (coeff t1) (coeff t2)))
+		   (add-terms (rest-terms l1)
+			      (rest-terms l2)))))))))
+
+(define (mul-terms l1 l2)
+  (if (empty-termlist? l1)
+      (the-empty-termlist)
+      (add-terms (mul-term-by-all-terms (first-term l1) l2)
+		 (mul-terms (rest-terms l1) l2))))
+
+(define (mul-term-by-all-terms t1 l)
+  (if (empty-termlist? l)
+      (the-empty-termlist)
+      (let ((t2 (first-term l)))
+	(adjoin-term 
+	 (make-term (+ (order t1) (order t2))
+		    (mul (coeff t1) (coeff t2)))
+	 (mul-term-by-all-terms t1 (rest-terms l))))))
+
+(define (sub-terms l1 l2)
+  (add-terms l1 (negate-termlist l2)))
+
+
+
 (define (install-polynomial-package)
   (define (make-poly variable termlist)
     (cons variable termlist))
@@ -223,23 +280,6 @@
   (define (same-variable? a b) (eq? a b))
   (define (negate-inner p) 
     (make-poly (variable p) (negate-termlist (termlist p))))
-  (define (add-terms l1 l2)
-    (cond ((empty-termlist? l1) l2)
-	  ((empty-termlist? l2) l1)
-	  (else
-	   (let ((t1 (first-term l1)) (t2 (first-term l2)))
-	     (cond ((> (order t1) (order t2))
-		    (adjoin-term
-		     t1 (add-terms (rest-terms l1) l2)))
-		   ((< (order t1) (order t2))
-		    (adjoin-term
-		     t2 (add-terms l1 (rest-terms l2))))
-		   (else 
-		    (adjoin-term
-		     (make-term (order t1)
-				(add (coeff t1) (coeff t2)))
-		     (add-terms (rest-terms l1)
-				(rest-terms l2)))))))))
   (define (add-poly p1 p2)
     (if (same-variable? (variable p1) (variable p2))
 	(make-poly (variable p1)
@@ -247,25 +287,19 @@
 			      (termlist p2)))
 	(error "polys not in same var -- add-poly"
 	       (list p1 p2))))
-  (define (mul-terms l1 l2)
-    (if (empty-termlist? l1)
-	(the-empty-termlist)
-	(add-terms (mul-term-by-all-terms (first-term l1) l2)
-		   (mul-terms (rest-terms l1) l2))))
-  (define (mul-term-by-all-terms t1 l)
-    (if (empty-termlist? l)
-	(the-empty-termlist)
-	(let ((t2 (first-term l)))
-	  (adjoin-term 
-	   (make-term (+ (order t1) (order t2))
-		      (mul (coeff t1) (coeff t2)))
-	   (mul-term-by-all-terms t1 (rest-terms l))))))
   (define (mul-poly p1 p2) 
     (if (same-variable? (variable p1) (variable p2))
 	(make-poly (variable p1)
 		   (mul-terms (termlist p1)
 			      (termlist p2)))
 	(error "polys not in same var -- mul-poly"
+	       (list p1 p2))))
+  (define (div-poly p1 p2)
+    (if (same-variable? (variable p1) (variable p2))
+	(make-poly (variable p1)
+		   (div-terms (termlist p1)
+			      (termlist p2)))
+	(error "polys not in same var -- div-poly"
 	       (list p1 p2))))
   (define (=zero?-inner p)
     (=zero?-termlist (termlist p)))
@@ -274,6 +308,8 @@
        (lambda (p1 p2) (tag (add-poly p1 p2))))
   (put 'mul '(polynomial polynomial)
        (lambda (p1 p2) (tag (mul-poly p1 p2))))
+  (put 'div '(polynomial polynomial)
+       (lambda (p1 p2) (tag (div-poly p1 p2))))
   (put 'make '(polynomial) 
        (lambda (var terms) (tag (make-poly var terms))))
   (put '=zero? '(polynomial)
@@ -305,16 +341,7 @@
       (and (= 0 (coeff (first-term termlist))) 
 	   (=zero?-termlist (rest-terms termlist)))))
 
-
-
-(define (negate-termlist t)
-  (if (empty-termlist? t)
-      t
-      (let ((first (first-term t)))
-	(adjoin-term 
-	 (make-term (order first) (negate (coeff first))) 
-	 (rest-terms t)))))
-
+        
 (define (install-termlist-sparse)
   (define (first-term-sparse termlist) 
     (if (null? termlist)
@@ -328,6 +355,17 @@
 	(cdr termlist)))
   (define (adjoin-term-sparse term termlist)
     (cons term termlist))
+  (define (negate-termlist-sparse t)
+    (define (inner-negate src dst)
+      (if (null? src)
+	  dst
+	  (let ((first (car src)))
+	    (inner-negate 
+	     (cdr src) 
+	     (cons (make-term (order first) (- (coeff first))) dst)))))
+    (if (null? t)
+      '()
+      (inner-negate (reverse t) '())))
   (put 'term-count (sparse-termlist-tag)
        (lambda (x) (term-count-sparse x)))
   (put 'first-term (sparse-termlist-tag)
@@ -336,6 +374,8 @@
        (lambda (x) (attach-tag (car (sparse-termlist-tag)) (rest-terms-sparse x))))
   (put 'adjoin-term-generic (sparse-termlist-tag)
        (lambda (term termlist) (attach-tag (car (sparse-termlist-tag)) (adjoin-term-sparse term termlist))))
+  (put 'negate-termlist (sparse-termlist-tag)
+       (lambda (t) (attach-tag (car (sparse-termlist-tag)) (negate-termlist-sparse t))))
   'done)
 (install-termlist-sparse)
 
@@ -367,10 +407,18 @@
 	      (cons (coeff t-inner) tlist-inner)
 	      (adjoin-term-dense t-inner (cons 0 tlist-inner)))))
     (if (null? termlist)
-	(if (= (order term) 0) 
+	(if (=zero? (order term)) 
 	    (list (coeff term))
 	    (adjoin-term-dense-inner term '(0)))
 	(adjoin-term-dense-inner term termlist)))
+  (define (negate-termlist-dense t)
+    (define (inner-negate src dst)
+      (if (null? src)
+	  dst
+	  (inner-negate (cdr src) (cons (- (car src)) dst))))
+    (if (null? t) 
+	'()
+	(inner-negate (reverse t) '())))
   (put 'first-term (dense-termlist-tag)
        (lambda (x) (first-term-dense x)))
   (put 'rest-terms (dense-termlist-tag)
@@ -379,8 +427,12 @@
        (lambda (term termlist) (attach-tag (car (dense-termlist-tag)) (adjoin-term-dense term termlist))))
   (put 'term-count (dense-termlist-tag)
        (lambda (x) (term-count-dense x)))
+  (put 'negate-termlist (dense-termlist-tag)
+       (lambda (x) (attach-tag (car (dense-termlist-tag)) (negate-termlist-dense x))))
   'done)
 (install-termlist-dense)
+
+
 
 	  
 ; generic functions
@@ -414,6 +466,19 @@
   (if val
       #t
       (error "test failed")))
+
+(define (test-equal expected got)
+  (if (equal? expected got)
+      #t
+      (begin
+	(display "expected ")
+	(display expected)
+	(newline)
+	(display " got ")
+	(display got)
+	(newline)
+	(error "test failed"))))
+
 
 (display '(first-term tests))
 (first-term '(termlist-sparse (1 1) (2 2)))
@@ -571,6 +636,32 @@
 (negate (make-from-real-imag 1 2))
 (negate (make-complex-from-real-imag 3 (- 1)))
 
+(display "negate termlist tests")
+(test (equal?
+       (negate-termlist '(termlist-dense 1 0 -1 0 0 0))
+       '(termlist-dense -1 0 1 0 0 0)))
+(test (equal?
+       (negate-termlist '(termlist-dense))
+       '(termlist-dense)))
+(test (equal?
+       (negate-termlist '(termlist-sparse (3 3) (1 1) (0 -5)))
+       '(termlist-sparse (3 -3) (1 -1) (0 5))))
+(test (equal?
+       (negate-termlist '(termlist-sparse))
+       '(termlist-sparse)))
 
+(display "div-terms tests")
+(test-equal
+ '((termlist-dense 1 0 1 0) (termlist-sparse (1 1) (0 -1)))
+ (div-terms '(termlist-sparse (5 1) (0 -1)) '(termlist-sparse (2 1) (0 -1))))
+(test-equal
+ '((termlist-dense) (termlist-sparse (1 1)))
+ (div-terms '(termlist-sparse (1 1)) '(termlist-sparse (2 1))))
+
+(display "div-poly tests")
+(test-equal
+ '(polynomial x (termlist-dense 1 0 1 0) (termlist-sparse (1 1) (0 -1)))
+ (div (make-poly 'x '(termlist-sparse (5 1) (0 -1))) (make-poly 'x '(termlist-sparse (2 1) (0 -1)))))
+			
 'done
 
